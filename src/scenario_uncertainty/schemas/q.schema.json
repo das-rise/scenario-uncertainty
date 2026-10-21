@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://das-rise.github.io/scenario-uncertainty/schemas/q.schema.json",
+  "title": "Q object: a quality value with its descriptors (SPEC §3)",
+  "type": "object",
+  "required": ["value", "unit", "stat", "level", "basis"],
+  "properties": {
+    "value": {"anyOf": [{"type": "number"}, {"type": "array", "items": {"type": "number"}}, {"type": "null"}]},
+    "unit": {"enum": ["m", "m2", "m/s", "m/s2", "rad", "rad2", "px", "px2", "s", "1", "rel"]},
+    "stat": {"enum": ["sigma", "cov", "rms", "mean", "max", "p", "ratio", "count", "value"]},
+    "level": {"enum": ["datum", "image", "frame", "object", "none"]},
+    "basis": {"enum": ["measured", "derived", "assumed", "unknown"]},
+    "n": {"type": ["integer", "null"]},
+    "source": {"type": ["string", "null"]},
+    "note": {"type": ["string", "null"]}
+  }
+}

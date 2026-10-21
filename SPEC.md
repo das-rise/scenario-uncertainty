@@ -272,7 +272,8 @@ OpenLABEL `vec` values must be flat arrays of numbers or strings, and object-lev
 
 ### P3.3 Per object: `objects[id].object_data`
 - Scalars go in OpenLABEL `num` entries (`{"name", "val": number}`), because object-level `vec` is string-only.
-- `marker_sigma_h_m`, `marker_sigma_v_m`: RTK σ of ArUco and visual markers (m / sigma / datum / measured).
+- `sigma_h_m`, `sigma_v_m` (`vec` of strings, one per corner, aligned with `arucoID`/`markerID` like `lat`/`long`/`alt`):
+  RTK σ of ArUco and visual markers (m / sigma / datum / measured). `"inf"` marks a corner without a value.
 - `review`: `vec` of strings `["<annotator>", "<ISO-8601 time>"]`, the latest review.
 
 ### P3.4 Origin vocabulary

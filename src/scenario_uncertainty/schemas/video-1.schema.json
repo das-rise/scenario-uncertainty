@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://das-rise.github.io/scenario-uncertainty/schemas/video-1.schema.json",
+  "title": "scenario-uncertainty/video/1: quality sidecar of a preprocessed video (SPEC P1)",
+  "type": "object",
+  "required": ["schema", "source", "frame_index"],
+  "$defs": {
+    "q": {
+      "type": "object",
+      "required": ["value", "unit", "stat", "level", "basis"],
+      "properties": {
+        "unit": {"enum": ["m", "m2", "m/s", "m/s2", "rad", "rad2", "px", "px2", "s", "1", "rel"]},
+        "stat": {"enum": ["sigma", "cov", "rms", "mean", "max", "p", "ratio", "count", "value"]},
+        "level": {"enum": ["datum", "image", "frame", "object", "none"]},
+        "basis": {"enum": ["measured", "derived", "assumed", "unknown"]}
+      }
+    },
+    "matrix3": {"type": "array", "minItems": 3, "maxItems": 3,
+                "items": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}},
+    "size": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer"}},
+    "frames": {"type": "array", "items": {"type": ["number", "boolean", "null"]}}
+  },
+  "properties": {
+    "schema": {"const": "scenario-uncertainty/video/1"},
+    "source": {
+      "type": "object",
+      "required": ["video"],
+      "properties": {"video": {"type": "string"}, "sha256": {"type": ["string", "null"]},
+                     "tool": {"type": ["string", "null"]}}
+    },
+    "frame_index": {
+      "type": "object",
+      "required": ["base", "n_frames", "offset_vs_srt", "aligned"],
+      "properties": {
+        "base": {"const": 0},
+        "n_frames": {"type": "integer", "minimum": 0},
+        "offset_vs_srt": {"type": ["integer", "null"]},
+        "srt": {"type": ["string", "null"]},
+        "aligned": {"type": ["boolean", "null"]}
+      }
+    },
+    "calibration": {
+      "type": ["object", "null"],
+      "required": ["calibrated_size", "video_size", "K_scaled", "K_raw_px", "D"],
+      "properties": {
+        "file": {"type": ["string", "null"]},
+        "calibrated_size": {"$ref": "#/$defs/size"},
+        "video_size": {"$ref": "#/$defs/size"},
+        "K_scaled": {"type": "boolean"},
+        "K_raw_px": {"$ref": "#/$defs/matrix3"},
+        "D": {"type": "array", "items": {"type": "number"}},
+        "new_K": {"anyOf": [{"$ref": "#/$defs/matrix3"}, {"type": "null"}]},
+        "roi": {"anyOf": [{"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "integer"}},
+                          {"type": "null"}]},
+        "alpha": {"type": ["number", "null"]},
+        "rms": {"anyOf": [{"$ref": "#/$defs/q"}, {"type": "null"}]},
+        "holdout_rms": {"anyOf": [{"$ref": "#/$defs/q"}, {"type": "null"}]}
+      }
+    },
+    "stabilization": {
+      "type": ["object", "null"],
+      "required": ["reference_frame", "transform", "summary", "per_frame"],
+      "properties": {
+        "reference_frame": {"type": "integer"},
+        "transform": {"type": "string"},
+        "detector": {"type": ["string", "null"]},
+        "smoothing": {"type": ["object", "null"]},
+        "summary": {
+          "type": "object",
+          "required": ["failed", "filled", "reproj_err"],
+          "properties": {"failed": {"$ref": "#/$defs/q"}, "filled": {"$ref": "#/$defs/q"},
+                         "reproj_err": {"$ref": "#/$defs/q"}}
+        },
+        "per_frame": {
+          "type": "object",
+          "required": ["inliers", "inlier_ratio", "reproj_err_px", "corner_disp_px", "filled"],
+          "properties": {"inliers": {"$ref": "#/$defs/frames"}, "inlier_ratio": {"$ref": "#/$defs/frames"},
+                         "reproj_err_px": {"$ref": "#/$defs/frames"}, "corner_disp_px": {"$ref": "#/$defs/frames"},
+                         "filled": {"$ref": "#/$defs/frames"}}
+        }
+      }
+    }
+  }
+}
