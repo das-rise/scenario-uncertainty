@@ -30,6 +30,7 @@ class WarningCode:
     DEFAULT_USED = "default_used"
     UNCALIBRATED_CONFIDENCE = "uncalibrated_confidence"
     METRIC_FAILED = "metric_failed"
+    CONTROL_POINTS_COMPUTED = "control_points_computed"
 
 
 def namespaces() -> dict[str, str]:

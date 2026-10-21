@@ -137,6 +137,7 @@ The level names come from the camera-based chain. A non-camera sensor uses the s
 | `adjustment_exceeds_validation` | The ORBIT manual adjustment is larger than the RTK validation error |
 | `adjustment_unknown` | The original clicks are lost, so the adjustment can't be separated |
 | `nonplanar_terrain` | The plane residual of control-point altitudes exceeds a threshold |
+| `control_points_computed` | Control-point pixels fit exactly (computed from geo positions, not clicked), so residuals say nothing |
 | `transform_method_unknown` | The georef doesn't state its transform method |
 | `default_used` | A §P7 default replaced a missing value (names the field) |
 | `uncalibrated_confidence` | Raw detector scores were used as probabilities |
@@ -217,30 +218,66 @@ Each profile is a contract owned by this spec. The producing tool implements it;
 
 ## P2. Profile `georef` — ORBIT georef JSON ≥ 1.2
 
-The existing keys are kept unchanged. `transformation_matrix` remains the matrix to use, i.e. `H_final`. The new keys are below.
+The existing keys are kept unchanged: `transformation_matrix` (the matrix to use), `inverse_matrix`,
+`control_points`, `reprojection_error`, `validation_error`, `proj_string`, and `transform_method` (still
+`homography`/`affine` for older readers). Everything below is optional and additive.
+
+**Top level**
 
 | Key | Content |
 |---|---|
 | `quality_spec` | `"scenario-uncertainty/0.1"` |
-| `control_points[].altitude_m` | RTK altitude, or null |
-| `control_points[].sigma_h_m`, `sigma_v_m` | RTK σ, or null |
-| `control_points[].sigma_px` | Pick precision (§P0.1 px), from zoom and the per-type human σ |
-| `control_points[].point_type` | From the RTK CSV, if present |
-| `control_points[].residual_m` | `[dE, dN]` of H_final(pixel) − RTK, for training and validation points |
-| `control_points[].residual_px` | H_final⁻¹(RTK) − clicked pixel (a true residual; before 1.2 this was a pixel→geo→pixel round trip) |
-| `control_points[].pixel_clicked` | `[x, y]` before any adjustment, or null if lost |
-| `H_fit` | 3×3 matrix fitted to `pixel_clicked`, or null |
-| `adjustment` | `{"A": 3×3, "params": {...}, "method": "keyboard"\|"pairs"\|"none"\|"unknown", "magnitude": Q(m, value, image)}` |
-| `validation` | `{"rms": Q, "datum": {...}, "internal": Q}`, see below |
-| `terrain` | `{"plane": [a, b, c], "residual": Q(m, sigma, image), "n": …}` from the control-point altitudes |
-| `covariance` | Optional: `{"H_cov": 8×8 flattened, "basis": …}` or `{"grid": …}` |
+| `transform_source` | What produced the matrix: `homography`, `hybrid`, `affine` or `drone_assisted` |
+| `leave_one_out` | Q(m, rms, image, derived, n): each training point predicted by a refit without it. Absent for drone-assisted, which is not fitted to the points. |
+| `validation` | With ≥ 3 validation points: `{"rms": Q, "datum": {"shift_m": [E, N], "rotation_deg", "scale_ppm"}, "internal": Q}`. `datum` is a 2D similarity fit (georef minus truth); `internal` is the RMS left after removing it. |
+| `terrain` | With ≥ 4 surveyed altitudes: `{"slope": [dz/dE, dz/dN], "z_centre_m", "residual": Q(m, sigma, image, measured)}`, the deviation of the altitudes from the best-fit plane |
+| `adjustment` | `{"method", "H_fit", "A", "magnitude"}`, see below |
+| `quality_error` | Present only if the quality keys could not be computed; the message |
 
-- **`validation.datum`** is the Helmert (2D similarity) fit between H_final(validation pixels) and RTK. It holds `shift_m` [E, N], `rotation_rad`, `scale` and their covariance (4×4, order E, N, rot, scale) as Q objects, level `datum`.
-- **`validation.internal`** is the RMS left after removing the similarity, level `image`. With fewer than 5 validation points it SHOULD be computed leave-one-out, and `note` says so.
-- **`rmse_pixels` from version 1.2 on** is a true residual (H_final⁻¹(RTK) − clicked pixel), not the earlier round trip. Readers MUST ignore `rmse_pixels` in files with `version` < 1.2.
-- **orbit-georef API** should expose:
-  - `jacobian(u, v)`: 2×2, m/px;
-  - `position_covariance(u, v)`: returns `{"datum": 2×2, "image": 2×2}` in m².
+**`adjustment.method`**
+
+| Value | Meaning |
+|---|---|
+| `none` | The points are where they were clicked; `H_fit` equals the exported matrix |
+| `baked` | One or more alignment adjustments moved the points. `H_fit` is the homography fitted to the original clicks; `A` is the composed adjustment (3×3, pixel space) |
+| `stored` | Drone-assisted: `A` is the stored adjustment applied to the camera-model mapping |
+| `unknown` | The project predates the recording of clicks (`pixel_clicked`), so any adjustment can't be separated |
+| `partly_unknown` | Some points lack a recorded click |
+
+`magnitude` is Q(m, max, image, measured): the largest ground displacement between the georeference before and
+after the adjustment, over the image.
+
+**Per control point**
+
+| Key | Content |
+|---|---|
+| `altitude_m` | Surveyed altitude, or absent |
+| `sigma_h_m`, `sigma_v_m` | Surveyed σ (e.g. from the RTK CSV), or absent |
+| `point_type` | From the RTK CSV, if present |
+| `pick_zoom` | Image-view zoom (screen px per image px) when the point was placed |
+| `sigma_px_quantisation` | `1 / (pick_zoom · √12)`: the placement error from screen-pixel resolution alone. Human pinpointing error is not included; consumers add it as a prior (§P7). |
+| `pixel_clicked` | `[x, y]` where the point was placed, before any baked adjustment |
+| `residual_m` | `[dE, dN]`: transformed pixel minus surveyed position, in the export's metric frame |
+| `residual_px` | Projection of the surveyed position minus the point's pixel |
+
+- **`rmse_pixels` from version 1.2 on** is a true residual. Before 1.2 it was a pixel→geo→pixel round trip and ≈ 0
+  by construction, so readers MUST ignore it in files with `version` < 1.2.
+- **Drone-assisted exports** (`transform_source: "drone_assisted"`) are in the declared `proj_string` frame from
+  ORBIT dev-uncertain on. Their `reprojection_error` was computed before the stored adjustment; their per-point
+  `residual_m` includes it.
+
+**orbit-georef API** (`GeoTransformer`):
+- `jacobian(u, v)`: 2×2, metres per pixel.
+- `position_covariance(u, v)`: `{"image": 2×2, "datum": 2×2, "basis": {...}, "source": {...}}` in m². Constant over
+  the image in 0.1. The image part comes from the most direct figure available, in this order:
+  1. `validation.internal`;
+  2. drone-assisted per-point residuals;
+  3. `leave_one_out`;
+  4. `validation_error.rmse_meters`;
+  5. 2 × `reprojection_error.rmse_meters`.
+
+  The datum part comes from `validation.datum.shift_m`; otherwise it is assumed to equal the image part.
+- `quality`: the raw quality keys of the file.
 
 ## P3. Profile `annotation` — SAVANT OpenLABEL
 
@@ -368,12 +405,13 @@ These are placeholders until measured values exist. Consumers MUST list every de
 | `sigma_px` for `manual` / `reviewed` | 0.5 × the detected value | |
 | `sigma_px` for `interpolated` / `tracked` | detected value × (1 + 0.1·k), k = `gap_distance` or 15 if unknown | |
 | `origin` when absent | `markit_housekeeping(gap)` → `interpolated`; other `markit_*` → `detected`; any other annotator → `manual` | Legacy inference |
-| Georef `image` term | `validation_error.rmse_meters` (isotropic), else `reprojection_error.rmse_meters` × 2 | Training RMSE underestimates |
+| Georef `image` term | The first available of the §P2 API order (validation internal, drone-assisted residuals, leave-one-out, validation RMSE, 2 × training RMSE) | Training RMSE underestimates |
 | Georef `datum` term | Same value as the image term | Unknown split |
 | `frame` term (stabilisation) | 0, with `[su:default_used]` | Unknown, *not* zero error; flagged |
 | Frame offset vs SRT | 0 if provenance says aligned; 1 if VIDr has one frame fewer than VIDc; else unknown → 0 with `[su:frame_offset_unknown]` | |
 | Vehicle height h | COSMO `DEFAULT_VEHICLE_HEIGHTS`, σ = 15 % of h | |
 | RTK σ | 0.02 m horizontal, 0.03 m vertical | |
+| Human pinpointing σ of a control point | 1.0 px per axis, combined in quadrature with `sigma_px_quantisation` | To be measured by re-clicking (repeat study) |
 
 ---
 
