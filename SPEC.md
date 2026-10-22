@@ -288,10 +288,15 @@ OpenLABEL `vec` values must be flat arrays of numbers or strings, and object-lev
 {"spec": "scenario-uncertainty/0.1",
  "error_model": {"file": "error_model.json", "sha256": "…", "basis": "measured"},
  "score_calibration": {"file": "…", "method": "isotonic", "ece": Q},
- "defaults_used": ["sigma_px"],
+ "localization": {…},
+ "origin_rule": {"human_factor": 0.5, "gap_growth": 0.1, "unknown_gap": 15},
+ "defaults_used": ["sigma_px", "origin_rule"],
  "share_interpolated": Q(1, ratio, none), "share_reviewed": Q(1, ratio, none)}
 ```
 - `error_model` is null when no error model exists. Then `sigma_px` is either absent or comes from §P7 defaults, and is listed in `defaults_used`.
+- `localization` is a copy of the error model's `localization` (§P4), or the §P7 default in the same form, and `origin_rule` the rule applied (§P7). With both in the file, a later writer (the editor) can recompute `sigma_px` of boxes it changes without the model file.
+- `share_interpolated`: share of boxes whose newest origin is `interpolated` or `manual_interpolated`. `share_reviewed`: share whose newest origin is `manual` or `reviewed` (a person drew, changed or confirmed the box itself; the editor's spline and tracker do not count).
+- Writers update the shares when they change boxes.
 
 ### P3.2 Per box: `frames[f].objects[id].object_data.vec`
 
@@ -305,6 +310,9 @@ OpenLABEL `vec` values must be flat arrays of numbers or strings, and object-lev
 | `quality_flags` | `[string, …]` | Any of `suddenappear`, `suddendisappear`, `size_step`, `jitter`, `edge_clipped`, `static` |
 
 - New entries are appended to `vec`. Readers find entries by `name`, never by position.
+- `sigma_px` and `p_exist` describe the box as it is now (newest origin), not a history. A writer that changes a box MUST recompute or remove them.
+- `p_exist`: calibrated score for `detected`/`merged` boxes of the detector the model describes; 1.0 for boxes a person made or confirmed (`manual*`, `reviewed`); absent otherwise (e.g. `interpolated`, or no score calibration).
+- Boxes of fiducial markers (e.g. ArUco) carry no `sigma_px`: their accuracy is not a detector's box error.
 - `origin` is a history list like `annotator`: index 0 is the newest, and it has the same length as `annotator` when both are present.
 
 ### P3.3 Per object: `objects[id].object_data`
@@ -330,10 +338,12 @@ Postprocessing passes that only adjust geometry (smoothing, rotation, spline, ou
 ### P3.5 VLM (tags and contexts)
 - Add `<field>_n_samples` (`num`, count) and `<field>_agreement` (`num`, ratio, none) next to the existing `<field>_confidence`.
 - `<field>_confidence` keeps its meaning: self-reported and uncalibrated.
+- `<field>_agreement`: share of the samples that gave the chosen value. For presence fields (seen in any sample) it is the share that saw it; for averaged numbers it is not written. For a context, samples are those inside its frame interval.
+- Both describe the VLM's own samples. When a person changes the value, the newest `<field>_annotator` entry shows it; the counts stay as a record of the VLM output.
 
 ### P3.6 Requirement on all readers and writers of SAVANT OpenLABEL
 - Unknown `vec` and `num` entries, unknown `metadata` keys and unknown `frame_properties` keys MUST be preserved on load and save.
-- edit currently drops or rejects them: its `vec` Literal union, `OpenLabelMetadata` and `FrameProperties`. This must be fixed **before** any writer emits §P3 fields (the SAVANT editor must be updated first).
+- The SAVANT editor preserves them since SAVANT 2.5.0; older editors drop or reject them, so files with §P3 fields must not be edited with an older editor.
 
 ## P4. Profile `model` — trainit error model
 - **File:** `error_model.json` next to `best.pt`.
@@ -341,14 +351,17 @@ Postprocessing passes that only adjust geometry (smoothing, rotation, spline, ou
 
 ```json
 {"schema": "scenario-uncertainty/model/1",
- "model": {"file": "best.pt", "sha256": "…"}, "dataset": {"manifest": "…", "split": "chunked", "val_frames": …},
- "localization": {"by_class": {"car": {"sigma": {"cx": [a, b], "cy": [a, b], "w": [a, b], "h": [a, b], "r": [a, b]}, "n": …}},
+ "model": {"file": "best.pt", "sha256": "…"}, "dataset": {"yaml": "…", "split": "val", "val_frames": …},
+ "localization": {"by_class": {"_all": {…}, "car": {"sigma": {"cx": [a, b], "cy": [a, b], "w": [a, b], "h": [a, b], "r": [a, b]}, "n": …}},
                   "model_form": "sigma = a + b*size_px", "size_px": "sqrt(w*h)", "iou_match": 0.5},
- "score_calibration": {"method": "isotonic", "x": [...], "y": [...], "ece": Q, "n": …},
+ "score_calibration": {"method": "isotonic", "x": [...], "y": [...], "ece": Q, "n": …, "predict_conf": 0.01},
  "metrics": {"map50": Q, "map50_95": Q, "per_class": {...}}}
 ```
 - σ for the angle uses rad. All other σ values use px.
-- Origin inflation is applied by markit, not stored here: σ² = σ_det² + q·k², with k = `gap_distance`. The value of q is recorded in markit's `metadata.quality`.
+- `by_class["_all"]` holds coefficients pooled over all classes; classes with too few matches have no entry of their own and use it.
+- `model.sha256` identifies the weights: readers ignore an error model whose hash does not match the weights they use.
+- Score calibration: P(prediction matches a ground-truth box | raw score), monotone, piecewise linear between the knots `x`/`y`, clamped outside. `ece` is that of the raw score.
+- Origin inflation is applied by the writer of the boxes, not stored here: for now the §P7 rule, recorded as `metadata.quality.origin_rule`. A measured rule (e.g. σ² = σ_det² + q·k², k = `gap_distance`) can replace it later under the same key.
 
 ## P5. Profile `world` — COSMO companion OpenLABEL
 
@@ -403,7 +416,7 @@ These are placeholders until measured values exist. Consumers MUST list every de
 |---|---|---|
 | `sigma_px` for `detected` | cx, cy: 0.02·√(w·h); w, h: 0.04·√(w·h); r: 0.05 rad | Rough guess, to be replaced by a measured error model (§P4) |
 | `sigma_px` for `manual` / `reviewed` | 0.5 × the detected value | |
-| `sigma_px` for `interpolated` / `tracked` | detected value × (1 + 0.1·k), k = `gap_distance` or 15 if unknown | |
+| `sigma_px` for `interpolated` / `tracked` / `manual_interpolated` / `manual_tracked` | detected value × (1 + 0.1·k), k = `gap_distance` or 15 if unknown | Listed as `origin_rule` in `defaults_used` |
 | `origin` when absent | `markit_housekeeping(gap)` → `interpolated`; other `markit_*` → `detected`; any other annotator → `manual` | Legacy inference |
 | Georef `image` term | The first available of the §P2 API order (validation internal, drone-assisted residuals, leave-one-out, validation RMSE, 2 × training RMSE) | Training RMSE underestimates |
 | Georef `datum` term | Same value as the image term | Unknown split |
