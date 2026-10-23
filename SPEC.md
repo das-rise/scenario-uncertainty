@@ -115,11 +115,12 @@ The level names come from the camera-based chain. A non-camera sensor uses the s
 
 ## 6. dataprov conventions
 ### 6.1 Namespace
-- Custom properties use the namespace prefix `su` with URI `https://das-rise.github.io/scenario-uncertainty/ns#`. Declare it via `custom_namespaces={"su": ...}`. It can sit alongside existing ones such as `savant`.
+- Custom properties use the namespace prefix `su` with URI `https://das-rise.github.io/scenario-uncertainty/ns#`. Declare it via `custom_namespaces={"su": ...}`. It can sit alongside existing ones such as `savant`. On a chain loaded from another tool's file, declare it too (dataprov ≥ 3.4: `ProvenanceChain.load(path, custom_namespaces=...)`; older dataprov: `provenance.declare_namespace(chain)`).
 - Key format: `activity:su:<name>`. The value is a Q object, or a dict of Q objects for grouped summaries.
 
 ### 6.2 Quality files as outputs
 - Quality sidecars are listed in `outputs`, with `output_formats` entry `scenario-uncertainty/<profile>/<major>`. dataprov then adds their SHA256 and size.
+- With dataprov ≥ 3.4 they also get the output role `quality` (`dataprov:QualityOutput`); the data products get `primary` and decision logs `log`. Readers find quality files with `chain.get_outputs(role="quality")`; files without roles are still identified by their `output_formats` entry.
 - Consumers find a quality file by that format string. They MUST check its SHA256 against the provenance record when both are available.
 - Consumers get quality files through explicit CLI paths. They don't discover them by walking the provenance chain.
 
@@ -278,6 +279,11 @@ after the adjustment, over the image.
 
   The datum part comes from `validation.datum.shift_m`; otherwise it is assumed to equal the image part.
 - `quality`: the raw quality keys of the file.
+- Optional `camera_model` section (ORBIT, 2026-10): pinhole camera (`K`, `R`, `C` in a local frame at `origin`)
+  over a terrain surface fitted to the control points' altitudes, with `fit` (`rms_px`, `leave_one_out_m`,
+  `homography_leave_one_out_m`, …). `pixel_to_ground_3d(u, v)` intersects the viewing ray with the terrain. The
+  homography stays the primary transform; consumers MAY use the camera model where its leave-one-out error is
+  smaller. Files without the section behave as before.
 
 ## P3. Profile `annotation` — SAVANT OpenLABEL
 
@@ -388,7 +394,7 @@ This is a SAVANT-style OpenLABEL file with `coordinate_systems.world = {"type": 
   | `sigma_size` | `[σL, σW]` | m |
   | `velocity_cov`, `acceleration_cov` | — | — |
   | `size_deviation` | `[dL, dW]` | m, value |
-  | `oblique` | `[method, shift_m, h_used]`, as strings | — |
+  | `oblique` | `[method, shift_m, h_used, fit_residual]`, as strings | `fit_residual`: final loss of a 3d fit (px²), empty otherwise; readers accept 3 elements (older files) |
   | `origin`, `p_exist` | Copied from the input | — |
 
 - `position_cov_rel` deliberately excludes `datum`. Absolute uncertainty = `position_cov_rel` + `metadata.quality.datum`.

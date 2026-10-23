@@ -41,8 +41,9 @@ def namespaces() -> dict[str, str]:
 def declare_namespace(chain: Any) -> None:
     """Declare the su prefix on an existing (loaded) dataprov chain.
 
-    dataprov only declares namespaces when a chain is created; a loaded chain keeps its registry in
-    `chain.namespaces`, which is the dict saved as the file's "prefix" section.
+    For dataprov < 3.4, which declared namespaces only when a chain was created. With dataprov >= 3.4 use
+    `ProvenanceChain.load(path, custom_namespaces=namespaces())` or `chain.declare_namespaces(namespaces())`.
+    A loaded chain keeps its registry in `chain.namespaces`, the dict saved as the file's "prefix" section.
     """
     chain.namespaces.setdefault(NAMESPACE_PREFIX, NAMESPACE_URI)
     data = getattr(chain, "data", None)
